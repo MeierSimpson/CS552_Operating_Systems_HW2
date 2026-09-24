@@ -4,6 +4,9 @@
 #include "bm.h"
 #include "utils.h"
 
+// The public BM pointer addresses bit 0. One word before it holds the
+// number of valid bits; the bytes that follow hold the packed bits.
+
 static size_t bmbits(BM b) { size_t *bits=b; return *--bits; }
 
 static size_t bmbytes(BM b) { return bits2bytes(bmbits(b)); }

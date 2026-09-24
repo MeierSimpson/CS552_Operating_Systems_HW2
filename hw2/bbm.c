@@ -2,6 +2,11 @@
 #include "bm.h"
 #include "utils.h"
 
+// mapsize: how many buddy pairs of order e overlap a pool of `size` bytes.
+// bitaddr: index of the pair that contains mem. Clearing bit e of the
+// offset snaps mem to the lower buddy, then dividing by two block sizes
+// yields the pair number.
+
 static size_t mapsize(size_t size, int e) {
   size_t blocksize=e2size(e);
   size_t blocks=divup(size,blocksize);
