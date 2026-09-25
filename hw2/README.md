@@ -37,18 +37,6 @@ make clean
 
 `test1` and `run1` are the same program. The homework 1 driver is its own test.
 
-### Valgrind
-
-The leak targets need Valgrind:
-
-```bash
-sudo apt update
-sudo apt install valgrind
-valgrind --version
-```
-
-`leaks1` and `leaks2` should report no leaks. `leaks2run` still reports the pool at exit. `wrapper.c` keeps the allocator in a static variable and never calls `bdelete`, so that memory is still reachable when the process ends.
-
 ## Files added or edited
 
 Supplied with the assignment, and left behaviorally unchanged:
@@ -72,14 +60,3 @@ Written for this assignment:
 | `GNUmakefile` | The targets in the table above. |
 
 Brought in from homework 1 and not modified for the allocator: `deq.c`, `deq.h`, `error.h`, and `main.c`.
-
-## What the course files expected
-
-The handout says the submission is evaluated on onyx. It does not name a makefile or a target. It says to compile and link the unchanged deque with the supplied `wrapper.c`.
-
-Two other makefiles were stored with this work, and both have been removed:
-
-- The course makefile compiled every `.c` file in a directory into one program. Its targets were the program itself, `run`, `valgrind`, and `clean`. The leak check was `valgrind --leak-check=full --show-leak-kinds=all`.
-- The homework 1 makefile set the program name to `deq`, included that course file, and added `try`, which linked `main.o` against `libdeq.so`. Nothing built `libdeq.so`. The homework 2 handout does not mention `try`.
-
-This directory cannot use the course rule as written. `main.c`, `test_alloc.c`, and `wraptest.c` each define `main`, so linking every `.c` file fails. The targets above build those programs separately. Nothing in the handout says onyx will invoke `test`, `test2`, or `run2` by those names.
