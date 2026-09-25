@@ -1,27 +1,56 @@
 CC=gcc
-CFLAGS=-Wall -Wextra -std=gnu11 -g
-SRC=utils.c bm.c bbm.c freelist.c balloc.c
+CFLAGS=-Wall -Wextra -std=gnu11 -g -D_GNU_SOURCE
 
-# Previous assignment, now in this directory. main(1).c is that project's
-# main.c; the "(1)" was added when the file was copied onto this machine.
-DEQ_MAIN=main(1).c
+# Allocator sources. Listed explicitly: main.c, test_alloc.c, and wraptest.c
+# each define main, so one program cannot be built from every .c file.
+ALLOC=utils.c bm.c bbm.c freelist.c balloc.c
 
-.PHONY: test clean
+VALGRIND=valgrind --leak-check=full --show-leak-kinds=all
 
-test: test_alloc test_wrap deq_try
+.PHONY: all test test1 test2 run1 run2 wrap leaks leaks1 leaks2 leaks2run clean
+
+all: deq test_alloc test_wrap deq_try
+
+test: test1 test2 wrap run2
+
+# Assignment 1: the deque and its driver, using the system allocator.
+test1 run1: deq
+	./deq
+
+# Assignment 2: the buddy allocator, exercised directly.
+test2: test_alloc
 	./test_alloc
+
+# Supplied malloc wrapper, without the deque.
+wrap: test_wrap
 	./test_wrap
+
+# Assignment 2 driver: the unchanged deque running on the buddy allocator.
+run2: deq_try
 	./deq_try
 
-test_alloc: test_alloc.c $(SRC)
-	$(CC) $(CFLAGS) -o $@ test_alloc.c $(SRC)
+deq: main.c deq.c error.h deq.h
+	$(CC) $(CFLAGS) -o $@ main.c deq.c
 
-test_wrap: wraptest.c wrapper.c $(SRC)
-	$(CC) $(CFLAGS) -o $@ wraptest.c wrapper.c $(SRC)
+test_alloc: test_alloc.c $(ALLOC)
+	$(CC) $(CFLAGS) -o $@ test_alloc.c $(ALLOC)
 
-# Quote the main filename: the parentheses would otherwise start a subshell.
-deq_try: $(DEQ_MAIN) deq.c wrapper.c $(SRC)
-	$(CC) $(CFLAGS) -D_GNU_SOURCE -o $@ "$(DEQ_MAIN)" deq.c wrapper.c $(SRC)
+test_wrap: wraptest.c wrapper.c $(ALLOC)
+	$(CC) $(CFLAGS) -o $@ wraptest.c wrapper.c $(ALLOC)
+
+deq_try: main.c deq.c wrapper.c $(ALLOC)
+	$(CC) $(CFLAGS) -o $@ main.c deq.c wrapper.c $(ALLOC)
+
+leaks: leaks1 leaks2 leaks2run
+
+leaks1: deq
+	$(VALGRIND) ./deq
+
+leaks2: test_alloc
+	$(VALGRIND) ./test_alloc
+
+leaks2run: deq_try
+	$(VALGRIND) ./deq_try
 
 clean:
-	rm -f test_alloc test_wrap deq_try
+	rm -f deq test_alloc test_wrap deq_try *.o *.d

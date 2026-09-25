@@ -10,6 +10,14 @@
 
 static int checks;
 
+// Count one check, and stop the program when it fails.
+//
+// Parameters:
+//   cond - nonzero when the check passed
+//   msg - the text written to stderr if it failed
+//
+// A passing check only increments the count. A failing check prints the
+// message and aborts through assert.
 static void expect(int cond, const char *msg) {
   checks++;
   if (!cond) {
@@ -18,6 +26,10 @@ static void expect(int cond, const char *msg) {
   }
 }
 
+// Check the power-of-two helpers, the bit operations, and mmalloc.
+//
+// Each helper is compared with a known result. The mapping test writes a
+// pattern and then releases the mapping.
 static void test_utils(void) {
   expect(divup(0,8)==0,"divup 0");
   expect(divup(1,8)==1,"divup 1");
@@ -47,6 +59,11 @@ static void test_utils(void) {
   mmfree(p,128);
 }
 
+// Check the general bitmap and the buddy-address helpers.
+//
+// The bitmap checks set, test, and clear individual bits. The address
+// checks use a fixed base so the buddy of a known offset is predictable.
+// A real mapping then checks that the two buddies share one pair bit.
 static void test_bitmaps(void) {
   BM b=bmcreate(10);
   expect(b!=0,"bmcreate");
@@ -73,7 +90,16 @@ static void test_bitmaps(void) {
   mmfree(pool,64);
 }
 
-// Allocate every remaining byte the buddy lists can represent.
+// Allocate every block a pool will still give out.
+//
+// Parameters:
+//   a - the pool to drain
+//   ps - storage for the returned block addresses
+//   cap - the maximum number of blocks ps can hold
+//   n - set to the number of blocks actually taken
+//
+// Each request asks for one byte, so every block is the pool's minimum
+// size. Returns the sum of the block sizes bsize reports.
 static unsigned drain(Balloc a, void **ps, int cap, int *n) {
   unsigned sum=0;
   *n=0;
@@ -90,11 +116,24 @@ static unsigned drain(Balloc a, void **ps, int cap, int *n) {
   return sum;
 }
 
+// Return every block in a list to its pool.
+//
+// Parameters:
+//   a - the pool the blocks came from
+//   ps - the block addresses
+//   n - how many addresses are in ps
+//
+// The blocks are freed in the order they were stored.
 static void free_all(Balloc a, void **ps, int n) {
   for (int i=0; i<n; i++)
     bfree(a,ps[i]);
 }
 
+// Check pool sizes that are not one maximum block.
+//
+// A pool that is not a power of two leaves a remainder smaller than the
+// minimum block unused. A pool larger than 2^u is several maximum blocks,
+// and those blocks are not merged past u. Bad bcreate arguments return 0.
 static void test_pool_geometry(void) {
   expect(bcreate(0,4,8)==0,"size 0");
   expect(bcreate(128,5,4)==0,"l > u");
@@ -119,7 +158,7 @@ static void test_pool_geometry(void) {
   free_all(a,ps,n);
   bdelete(a);
 
-  // Larger than 2^u: several max-sized blocks, never merged past u.
+  // Larger than 2^u: several maximum blocks, never merged past u.
   a=bcreate(256,4,6);
   expect(balloc(a,128)==0,"request above 2^u fails");
   void *b64[8];
@@ -143,10 +182,26 @@ static void test_pool_geometry(void) {
   bdelete(a);
 }
 
+// Fill a block with one repeated byte.
+//
+// Parameters:
+//   p - the first byte to fill
+//   n - how many bytes to write
+//   pat - the byte written into each position
+//
+// The whole range is overwritten, including the first word.
 static void fill(void *p, unsigned n, unsigned char pat) {
   memset(p,pat,n);
 }
 
+// Report whether a block still holds one repeated byte.
+//
+// Parameters:
+//   p - the first byte to inspect
+//   n - how many bytes to inspect
+//   pat - the byte that should be in each position
+//
+// Returns 1 when every byte matches. Returns 0 at the first mismatch.
 static int intact(void *p, unsigned n, unsigned char pat) {
   unsigned char *c=p;
   for (unsigned i=0; i<n; i++)
@@ -155,6 +210,12 @@ static int intact(void *p, unsigned n, unsigned char pat) {
   return 1;
 }
 
+// Check that buddies merge, and that a live block's bytes stay intact.
+//
+// Two minimum blocks must coalesce only after both are freed. Freeing
+// one must not write a header into the other. Freeing in an awkward
+// order, and freeing a parent while a smaller piece is live, must still
+// rebuild the whole pool once everything is free.
 static void test_coalesce_and_contents(void) {
   Balloc a=bcreate(32,4,5);
   void *x=balloc(a,1);
@@ -163,7 +224,7 @@ static void test_coalesce_and_contents(void) {
   expect(balloc(a,1)==0,"pool exhausted");
   fill(x,16,0xa1);
   fill(y,16,0xb2);
-  // First word is user data. Freeing must not have stored a header there.
+  // The first word is user data. Freeing must not have stored a header there.
   *(void **)x=(void *)(uintptr_t)0x1111;
   expect(intact((char *)x+sizeof(void *),16-sizeof(void *),0xa1),"tail of x");
   bfree(a,x);
@@ -174,7 +235,7 @@ static void test_coalesce_and_contents(void) {
   expect(z && bsize(a,z)==32,"buddies coalesced");
   bfree(a,z);
   bfree(a,0);
-  bfree(a,z); // double free is ignored
+  bfree(a,z); // A second free of the same block is ignored.
   expect(bsize(a,z)==0,"freed block has no size");
   bdelete(a);
 
@@ -196,7 +257,7 @@ static void test_coalesce_and_contents(void) {
   expect(z && bsize(a,z)==64,"full 64 coalesced");
   bfree(a,z);
 
-  // A split buddy must not look like the allocation order of its parent.
+  // A split block must not be reported as still allocated at the parent order.
   void *big=balloc(a,32);
   void *small=balloc(a,16);
   expect(big && small && bsize(a,big)==32 && bsize(a,small)==16,"mixed orders");
@@ -212,6 +273,12 @@ static void test_coalesce_and_contents(void) {
   bdelete(a);
 }
 
+// Check rounding, a bad free, and two pools at once.
+//
+// A request below 2^l receives the minimum block, and a request between
+// two powers of two rounds up. Freeing an address inside a live block
+// must not change that block. Freeing from one pool must not change the
+// bytes of the other.
 static void test_rounding_and_two_pools(void) {
   Balloc a=bcreate(256,4,8);
   void *p=balloc(a,0);
@@ -220,7 +287,7 @@ static void test_rounding_and_two_pools(void) {
   p=balloc(a,17);
   expect(p && bsize(a,p)==32,"17 rounds up to 32");
   expect(bsize(a,(char *)p+16)==0,"interior pointer is not a block");
-  bfree(a,(char *)p+16); // must not disturb p
+  bfree(a,(char *)p+16); // An interior address must not disturb p.
   fill(p,32,0x7e);
   expect(intact(p,32,0x7e),"interior free was a no-op");
   bfree(a,p);
@@ -239,11 +306,23 @@ static void test_rounding_and_two_pools(void) {
   bdelete(0);
 }
 
+// Advance a simple integer generator.
+//
+// Parameters:
+//   s - the previous value, replaced with the next one
+//
+// Returns the new value. The sequence is deterministic, so a failure can
+// be repeated.
 static unsigned lcg(unsigned *s) {
   *s=*s*1664525u+1013904223u;
   return *s;
 }
 
+// Allocate and free in a mixed order, then rebuild the whole pool.
+//
+// Live blocks are filled with a pattern and checked before they are
+// freed. A new block must not overlap one that is still live. After the
+// last block is freed, draining the pool must return the original size.
 static void test_random(void) {
   enum { SLOTS=256, POOL=4096 };
   struct { void *p; unsigned n; unsigned char pat; } live[SLOTS];
@@ -264,7 +343,7 @@ static void test_random(void) {
       bfree(a,live[i].p);
       live[i]=live[--nlive];
     } else {
-      unsigned req=1u<<(lcg(&seed)%8); // 1..128
+      unsigned req=1u<<(lcg(&seed)%8); // Requests run from 1 byte through 128.
       void *p=balloc(a,req);
       if (!p)
         continue;
@@ -294,6 +373,11 @@ static void test_random(void) {
   bdelete(a);
 }
 
+// Create and destroy the same pool shape many times.
+//
+// Each pass allocates one block, checks that a 40-byte request became a
+// 64-byte block, frees it, and deletes the pool. The minimum order here
+// is 3, so the smallest block is 8 bytes.
 static void test_recreate(void) {
   for (int i=0; i<50; i++) {
     Balloc a=bcreate(128,3,7);
@@ -304,6 +388,10 @@ static void test_recreate(void) {
   }
 }
 
+// Run every allocator check and print how many passed.
+//
+// The groups stop the program at the first failed check. The printed
+// count is the number of checks that passed.
 int main(void) {
   test_utils();
   test_bitmaps();
