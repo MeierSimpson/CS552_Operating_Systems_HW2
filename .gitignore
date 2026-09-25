@@ -1,0 +1,16 @@
+# Programs produced by hw2/GNUmakefile
+hw2/deq
+hw2/deq_try
+hw2/test_alloc
+hw2/test_wrap
+hw2/try
+
+# Compiler and editor leftovers
+*.o
+*.d
+*.i
+*.so
+*~
+*.swp
+.DS_Store
+Thumbs.db
